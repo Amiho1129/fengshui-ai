@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>風水導航 2026 — 龍脈尋穴系統 PRO</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #000;
+            color: #0f0;
+            font-family: "Courier New", "微軟正黑體", monospace;
+            overflow: hidden;
+        }
+
+        /* ── 地圖 ── */
+        #map {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 1;
+            filter: brightness(0.45) invert(1) contrast(3) hue-rotate(120deg);
+        }
+
+        /* ── Three.js ── */
+        #overlay-canvas {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* ── 掃描線 ── */
+        #scan-line {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 4px;
+            background: linear-gradient(transparent, rgba(0,255,80,0.25), transparent);
+            z-index: 3; pointer-events: none;
+            animation: scanDown 5s linear infinite; display: none;
+        }
+        @keyframes scanDown { 0%{top:0} 100%{top:100%} }
+
+        /* ── 羅盤環 ── */
+        #compass-ring {
+            position: absolute; left: 50%; top: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 6; width: 130px; height: 130px;
+            border-radius: 50%;
+            border: 2px solid rgba(0,255,80,0.3);
+            pointer-events: none; display: none;
+            transition: transform 0.15s ease;
+        }
+        #compass-arrow {
+            position: absolute; left: 50%; top: 8px;
+            transform: translateX(-50%);
+            width: 0; height: 0;
+            border-left: 9px solid transparent;
+            border-right: 9px solid transparent;
+            border-bottom: 30px solid #0f0;
+            filter: drop-shadow(0 0 7px #0f0);
+        }
+
+        /* ── 頂部 HUD ── */
+        #hud-top {
+            position: absolute; top: 0; left: 0; right: 0;
+            z-index: 10; text-align: center;
+            background: rgba(0, 20, 0, 0.90);
+            border-bottom: 2px solid #0f0;
+            padding: 10px 50px 8px;
+        }
+        #hud-top .title { font-size: 1.1rem; font-weight: bold; letter-spacing: 2px; }
+        #hud-top .sub   { font-size: 11px; color: #afa; margin-top: 3px; }
+
+        /* ── 龍穴選擇按鈕（右上角）── */
+        #open-select-btn {
+            position: absolute; top: 10px; right: 10px;
+            z-index: 20;
+            background: rgba(0,0,0,0.85);
+            border: 1px solid #ffd700;
+            color: #ffd700;
+            border-radius: 6px;
+            padding: 7px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            letter-spacing: 1px;
+        }
+        #open-select-btn:active { background: #1a1a00; }
+
+        /* ── 左側資料面板 ── */
+        #data-box {
+            position: absolute; left: 10px; top: 88px;
+            z-index: 10;
+            background: rgba(0,0,0,0.84);
+            border-left: 3px solid #0f0;
+            padding: 11px 13px;
+            font-size: 12px; line-height: 2;
+            min-width: 210px;
+            pointer-events: none;
+        }
+        #data-box .lbl { color: #0f0; }
+        #data-box .val { color: #fff; font-weight: bold; }
+
+        /* ── 右側距離面板 ── */
+        #dist-box {
+            position: absolute; right: 10px; top: 88px;
+            z-index: 10;
+            background: rgba(0,0,0,0.84);
+            border-right: 3px solid #ffd700;
+            padding: 11px 13px;
+            font-size: 12px; line-height: 1.8;
+            min-width: 155px; text-align: right;
+            pointer-events: none;
+        }
+
+        /* ── 底部 HUD ── */
+        #hud-bottom {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            z-index: 10; text-align: center;
+            background: rgba(25, 25, 0, 0.90);
+            border-top: 2px solid #ffd700;
+            padding: 12px 10px;
+        }
+        #diff-bar-wrap {
+            width: 78%; margin: 6px auto 0;
+            height: 7px; background: rgba(255,255,255,0.1);
+            border-radius: 4px; overflow: hidden; display: none;
+        }
+        #diff-bar {
+            height: 100%; width: 50%; background: #f00;
+            border-radius: 4px; transition: width 0.3s, background 0.3s;
+        }
+
+        /* ── 選穴面板（側滑）── */
+        #select-panel {
+            position: absolute; top: 0; right: -360px;
+            width: 340px; height: 100%;
+            z-index: 50;
+            background: rgba(0, 10, 0, 0.97);
+            border-left: 2px solid #0f0;
+            display: flex; flex-direction: column;
+            transition: right 0.35s cubic-bezier(.4,0,.2,1);
+            overflow: hidden;
+        }
+        #select-panel.open { right: 0; }
+
+        #select-panel-header {
+            padding: 16px 14px 10px;
+            border-bottom: 1px solid #1a3a1a;
+            display: flex; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
+        }
+        #select-panel-header .ttl { font-size: 15px; font-weight: bold; color: #ffd700; }
+        #close-panel-btn {
+            background: none; border: 1px solid #444;
+            color: #aaa; border-radius: 4px;
+            padding: 4px 10px; cursor: pointer; font-size: 13px;
+        }
+
+        /* 搜尋欄 */
+        #search-bar {
+            padding: 8px 12px;
+            flex-shrink: 0;
+            border-bottom: 1px solid #1a3a1a;
+        }
+        #search-input {
+            width: 100%; background: #0a1a0a;
+            border: 1px solid #0f0; border-radius: 5px;
+            color: #0f0; font-family: inherit;
+            font-size: 12px; padding: 6px 10px;
+            outline: none;
+        }
+        #search-input::placeholder { color: #3a5a3a; }
+
+        /* 排序按鈕 */
+        #sort-bar {
+            padding: 6px 12px;
+            display: flex; gap: 6px;
+            flex-shrink: 0;
+        }
+        .sort-btn {
+            flex: 1; background: #0a1a0a;
+            border: 1px solid #1a3a1a; border-radius: 4px;
+            color: #6a9a6a; font-size: 10px; padding: 4px;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .sort-btn.active { background: #0f0; color: #000; border-color: #0f0; }
+
+        /* 龍穴卡片列表 */
+        #den-list {
+            flex: 1; overflow-y: auto;
+            padding: 8px 10px 20px;
+        }
+        #den-list::-webkit-scrollbar { width: 4px; }
+        #den-list::-webkit-scrollbar-track { background: #000; }
+        #den-list::-webkit-scrollbar-thumb { background: #0f0; border-radius: 2px; }
+
+        .den-card {
+            background: rgba(0,30,0,0.6);
+            border: 1px solid #1a3a1a;
+            border-radius: 8px;
+            padding: 11px 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+        .den-card::before {
+            content: '';
+            position: absolute; left: 0; top: 0; bottom: 0;
+            width: 4px;
+        }
+        .den-card:active, .den-card.selected {
+            border-color: #ffd700;
+            background: rgba(30,25,0,0.8);
+        }
+        .den-card.selected::after {
+            content: '✓ 已選定';
+            position: absolute; top: 8px; right: 10px;
+            color: #ffd700; font-size: 10px; font-weight: bold;
+        }
+
+        .den-card-top {
+            display: flex; align-items: center; gap: 8px;
+            margin-bottom: 5px;
+        }
+        .den-emoji  { font-size: 22px; flex-shrink: 0; }
+        .den-name   { font-size: 14px; font-weight: bold; color: #fff; }
+        .den-type   { font-size: 10px; padding: 2px 6px; border-radius: 10px;
+                      border: 1px solid; margin-left: 4px; }
+        .den-desc   { font-size: 11px; color: #7a9a7a; line-height: 1.5; margin-bottom: 6px; }
+
+        .den-stats  { display: flex; gap: 8px; flex-wrap: wrap; }
+        .den-stat   {
+            font-size: 10px; padding: 2px 7px;
+            background: rgba(0,0,0,0.5);
+            border: 1px solid #1a3a1a; border-radius: 3px;
+        }
+        .den-stat span { color: #fff; font-weight: bold; }
+
+        /* 能量條 */
+        .power-bar-wrap {
+            margin-top: 6px; height: 4px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px; overflow: hidden;
+        }
+        .power-bar { height: 100%; border-radius: 2px; }
+
+        /* HTTPS 警告 */
+        #https-warn {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 100; background: rgba(160,0,0,0.95);
+            color: #fff; border: 2px solid #f44;
+            border-radius: 10px; padding: 20px 24px;
+            text-align: center; font-size: 13px; line-height: 1.9;
+            max-width: 310px; display: none;
+        }
+
+        /* 通用文字 */
+        .gold   { color: #ffd700; text-shadow: 0 0 5px #ffd700; }
+        .green  { color: #0f0; }
+        .dir-text { font-size: 1.15rem; font-weight: bold; letter-spacing: 2px; }
+
+        /* 啟動按鈕 */
+        #nav-btn {
+            background: #0f0; color: #000;
+            border: none; padding: 11px 28px;
+            font-size: 14px; font-weight: bold;
+            border-radius: 6px; cursor: pointer;
+            box-shadow: 0 0 18px #0f0;
+            letter-spacing: 1px;
+        }
+        #nav-btn:active { background: #0a0; }
+
+        @keyframes pulse {
+            0%{opacity:.5} 50%{opacity:1} 100%{opacity:.5}
+        }
+        .sync-active {
+            animation: pulse 0.8s infinite;
+            color: #fff; background: #b00;
+            padding: 3px 8px; border-radius: 4px;
+            font-size: 13px; font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div id="map"></div>
+<canvas id="overlay-canvas"></canvas>
+<div id="scan-line"></div>
+
+<!-- 羅盤環 -->
+<div id="compass-ring"><div id="compass-arrow"></div></div>
+
+<!-- HTTPS 警告 -->
+<div id="https-warn">
+    ⚠️ 安全性限制<br>
+    感測器與 GPS 需在 <strong>HTTPS</strong> 環境下運作。<br>
+    請部署至 HTTPS 伺服器或使用 <code>localhost</code>。
+</div>
+
+<!-- 頂部 HUD -->
+<div id="hud-top">
+    <div class="title" id="top-title">🐉 龍脈尋穴系統 PRO — WMM 2026</div>
+    <div class="sub"   id="top-sub">磁場已同步 · 請選擇目標龍穴，啟動感測器導航</div>
+</div>
+
+<!-- 龍穴選擇按鈕 -->
+<button id="open-select-btn" onclick="openPanel()">🗺️ 選擇龍穴</button>
+
+<!-- 左側資料面板 -->
+<div id="data-box">
+    <div><span class="lbl">龍穴名稱：</span><span class="val" id="db-name">—</span></div>
+    <div><span class="lbl">氣場 K 值：</span><span class="val" id="db-k">—</span> <span class="gold" id="db-kstate"></span></div>
+    <div><span class="lbl">龍穴類型：</span><span class="gold" id="db-type">—</span></div>
+    <div><span class="lbl">WMM 磁偏角：</span><span class="val">−4.25°（2026）</span></div>
+    <hr style="border:0;border-top:1px solid #1a3a1a;margin:6px 0;">
+    <div><span class="lbl">目標方位：</span><span class="val" id="db-bearing">— °</span></div>
+    <div id="db-heading-row" style="display:none;">
+        <span class="lbl">當前真北：</span><span class="val" id="db-heading">—°</span>
+    </div>
+    <div id="db-platform-row" style="display:none;">
+        <span class="lbl">感測器：</span><span class="val" id="db-platform">—</span>
+    </div>
+</div>
+
+<!-- 右側距離面板 -->
+<div id="dist-box">
+    <div class="gold">📍 龍穴距離</div>
+    <div style="font-size:24px;font-weight:bold;" id="dist-val">— m</div>
+    <div style="font-size:10px;color:#aaa;margin-top:4px;">目標座標</div>
+    <div style="font-size:11px;color:#fff;" id="dist-lat">—</div>
+    <div style="font-size:11px;color:#fff;" id="dist-lon">—</div>
+    <hr style="border:0;border-top:1px solid #3a3a00;margin:5px 0;">
+    <div style="font-size:11px;">GPS 精度：<span class="gold" id="gps-acc">—</span></div>
+</div>
+
+<!-- 底部 HUD -->
+<div id="hud-bottom">
+    <div id="guide-msg" style="font-size:13px;margin-bottom:5px;">
+        請先選擇目標龍穴，再啟動尋穴系統
+    </div>
+    <div class="dir-text gold" id="bottom-dir" style="margin-bottom:7px;">
+        🐉 請選擇目標龍穴 · 啟動感測器導航
+    </div>
+    <div id="diff-bar-wrap"><div id="diff-bar"></div></div>
+    <br>
+    <button id="nav-btn" onclick="startSystem()">⚡ 啟動尋穴系統 ⏛</button>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     選穴側滑面板
+════════════════════════════════════════════ -->
+<div id="select-panel">
+    <div id="select-panel-header">
+        <span class="ttl">🐉 選擇目標龍穴</span>
+        <button id="close-panel-btn" onclick="closePanel()">✕ 關閉</button>
+    </div>
+
+    <div id="search-bar">
+        <input id="search-input" type="text" placeholder="🔍 搜尋龍穴名稱或類型…" oninput="filterDens(this.value)">
+    </div>
+
+    <div id="sort-bar">
+        <button class="sort-btn active" id="sort-power" onclick="sortDens('power')">⚡ 依能量</button>
+        <button class="sort-btn"        id="sort-dist"  onclick="sortDens('dist')">📍 依距離</button>
+        <button class="sort-btn"        id="sort-name"  onclick="sortDens('name')">🔤 依名稱</button>
+    </div>
+
+    <div id="den-list"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  龍穴資料庫（12 個台灣著名風水地點）
+// ═══════════════════════════════════════════════════════
+const DRAGON_DENS = [
+    {
+        id: 0,
+        name: "新竹關西祖龍穴",
+        emoji: "🐲",
+        coords: [24.7654, 121.0123],
+        type: "山龍穴",
+        typeColor: "#0f0",
+        k: 0.92,
+        power: 92,
+        desc: "三山環抱，龍虎相交，砂水齊聚，地氣旺盛凝聚，為本系統原始定位穴位。",
+        special: "五行屬木",
+        color: "#00ff44"
+    },
+    {
+        id: 1,
+        name: "陽明山火龍穴",
+        emoji: "🌋",
+        coords: [25.1518, 121.5591],
+        type: "火山龍穴",
+        typeColor: "#ff4400",
+        k: 0.97,
+        power: 97,
+        desc: "火山地熱聚氣，硫磺之氣化煞，陽氣極旺，天干地支合局，為北台灣第一火龍穴。",
+        special: "五行屬火",
+        color: "#ff6600"
+    },
+    {
+        id: 2,
+        name: "玉山頂天龍穴",
+        emoji: "⛰️",
+        coords: [23.4709, 120.9572],
+        type: "帝龍穴",
+        typeColor: "#ffd700",
+        k: 0.99,
+        power: 99,
+        desc: "東亞第一高峰，萬山朝拱，雲霧繚繞，龍氣衝天，帝王之地，五千尺之上的至陽之穴。",
+        special: "五行屬金（最高）",
+        color: "#ffd700"
+    },
+    {
+        id: 3,
+        name: "阿里山神木龍穴",
+        emoji: "🌲",
+        coords: [23.5118, 120.8038],
+        type: "木龍穴",
+        typeColor: "#00cc44",
+        k: 0.88,
+        power: 88,
+        desc: "千年神木群聚，木氣凝結千年，靈氣充沛，日出雲海交織，陰陽調和之極境。",
+        special: "五行屬木",
+        color: "#00cc44"
+    },
+    {
+        id: 4,
+        name: "太魯閣峽谷龍穴",
+        emoji: "🏔️",
+        coords: [24.1575, 121.6220],
+        type: "水龍穴",
+        typeColor: "#00aaff",
+        k: 0.91,
+        power: 91,
+        desc: "立霧溪切割大理岩，水龍蜿蜒穿山，陰陽二氣交匯，奇峰聳立，氣勢磅礡之聖地。",
+        special: "五行屬水",
+        color: "#00aaff"
+    },
+    {
+        id: 5,
+        name: "日月潭雙龍穴",
+        emoji: "🌊",
+        coords: [23.8566, 120.9175],
+        type: "陰陽龍穴",
+        typeColor: "#aa44ff",
+        k: 0.94,
+        power: 94,
+        desc: "日潭陽、月潭陰，陰陽互抱如太極，水面靈氣凝聚，四周群山環護，為台灣最著名陰陽龍穴。",
+        special: "陰陽並濟",
+        color: "#aa44ff"
+    },
+    {
+        id: 6,
+        name: "獅頭山天獅穴",
+        emoji: "🦁",
+        coords: [24.5997, 120.8822],
+        type: "獸形龍穴",
+        typeColor: "#ffaa00",
+        k: 0.85,
+        power: 85,
+        desc: "山形如巨獅昂首，獅口含珠，佛道共融，千年香火不斷，靈獸守護之吉穴。",
+        special: "靈獸守護",
+        color: "#ffaa00"
+    },
+    {
+        id: 7,
+        name: "清境合歡雲龍穴",
+        emoji: "☁️",
+        coords: [24.0900, 121.1700],
+        type: "雲龍穴",
+        typeColor: "#aaddff",
+        k: 0.87,
+        power: 87,
+        desc: "海拔三千公尺以上，常年雲霧漫繞，雲龍出沒其間，寒氣凝煞，清氣聚頂，高山靈穴。",
+        special: "五行屬水（雲）",
+        color: "#aaddff"
+    },
+    {
+        id: 8,
+        name: "梨山聖泉龍穴",
+        emoji: "💧",
+        coords: [24.2601, 121.2228],
+        type: "水源龍穴",
+        typeColor: "#00ddff",
+        k: 0.83,
+        power: 83,
+        desc: "大甲溪水源之地，山中聖泉涌出，水龍聚首，大地之母乳之源，滋養萬物之靈穴。",
+        special: "五行屬水（源）",
+        color: "#00ddff"
+    },
+    {
+        id: 9,
+        name: "北港媽祖天后穴",
+        emoji: "🏯",
+        coords: [23.5684, 120.3011],
+        type: "神廟龍穴",
+        typeColor: "#ff44aa",
+        k: 0.96,
+        power: 96,
+        desc: "三百年香火凝聚神龍，信眾億萬香火化氣，聚成罕見的人文龍穴，神力護佑四方。",
+        special: "人文靈氣",
+        color: "#ff44aa"
+    },
+    {
+        id: 10,
+        name: "九份黃金龍脈",
+        emoji: "⚡",
+        coords: [25.1097, 121.8444],
+        type: "金龍穴",
+        typeColor: "#ffd700",
+        k: 0.89,
+        power: 89,
+        desc: "百年黃金礦脈所在，金氣尚存於地中，山城依山望海，靠山面水，格局完整之金龍穴。",
+        special: "五行屬金（礦）",
+        color: "#ffd700"
+    },
+    {
+        id: 11,
+        name: "知本溫泉地龍穴",
+        emoji: "♨️",
+        coords: [22.7568, 121.0530],
+        type: "地熱龍穴",
+        typeColor: "#ff6644",
+        k: 0.86,
+        power: 86,
+        desc: "地熱溫泉湧出，地龍在地底騰動，熱氣上蒸，山水環抱，南台灣最旺的地龍聚氣之所。",
+        special: "五行屬火（地）",
+        color: "#ff6644"
+    }
+];
+
+// ═══════════════════════════════════════════════════════
+//  全域狀態
+// ═══════════════════════════════════════════════════════
+const MAG_DECL      = -4.25;    // WMM 2026 台灣磁偏角
+const ALIGN_THRESH  = 1.5;      // 對準容許誤差（度）
+
+let map, userMarker, denMarker, pathLine;
+let scene, camera, renderer, qiPoints;
+let systemStarted  = false;
+let firstLocDone   = false;
+let currentDen     = null;      // 目前選定龍穴
+let userLat        = null;
+let userLon        = null;
+let currentSort    = 'power';
+let filterText     = '';
+
+// ═══════════════════════════════════════════════════════
+//  初始化
+// ═══════════════════════════════════════════════════════
+function init() {
+    checkHttps();
+    initMap();
+    initThreeJS();
+    renderDenList();
+    // 預設選第一個
+    selectDen(DRAGON_DENS[0]);
+}
+
+function checkHttps() {
+    const ok = location.protocol === 'https:'
+             || location.hostname === 'localhost'
+             || location.hostname === '127.0.0.1';
+    if (!ok) document.getElementById('https-warn').style.display = 'block';
+}
+
+function initMap() {
+    map = L.map('map', {
+        center: [23.97, 120.97], zoom: 8,
+        zoomControl: false, attributionControl: false
+    });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+    // 在地圖上標記所有龍穴（小點）
+    DRAGON_DENS.forEach(den => {
+        const icon = L.divIcon({
+            html: `<div style="font-size:18px;opacity:0.6;">${den.emoji}</div>`,
+            iconSize: [24, 24], iconAnchor: [12, 12], className: ''
+        });
+        L.marker(den.coords, { icon }).addTo(map)
+            .bindPopup(`<b style="color:#0a0">${den.name}</b><br>能量 ${den.power}% · ${den.type}`);
+    });
+}
+
+function initThreeJS() {
+    const canvas = document.getElementById('overlay-canvas');
+    scene    = new THREE.Scene();
+    camera   = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.position.z = 5;
+
+    const geo = new THREE.BufferGeometry();
+    const pos = [];
+    for (let i = 0; i < 2500; i++) {
+        pos.push((Math.random() - 0.5) * 10, Math.random() * 4 - 0.5, (Math.random() - 0.5) * 10);
+    }
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    qiPoints = new THREE.Points(geo, new THREE.PointsMaterial({
+        color: 0x00ff88, size: 0.045, transparent: true, opacity: 0.60
+    }));
+    scene.add(qiPoints);
+    renderLoop();
+}
+
+function renderLoop() {
+    requestAnimationFrame(renderLoop);
+    if (qiPoints) qiPoints.rotation.y += 0.004;
+    renderer.render(scene, camera);
+}
+
+// ═══════════════════════════════════════════════════════
+//  龍穴選擇邏輯
+// ═══════════════════════════════════════════════════════
+function openPanel()  { document.getElementById('select-panel').classList.add('open');    }
+function closePanel() { document.getElementById('select-panel').classList.remove('open'); }
+
+function selectDen(den) {
+    currentDen = den;
+
+    // 更新左側面板
+    document.getElementById('db-name').innerText  = den.name;
+    document.getElementById('db-k').innerText     = den.k.toFixed(2);
+    document.getElementById('db-kstate').innerText = den.k >= 0.95 ? '（極旺）' : den.k >= 0.90 ? '（旺盛）' : '（穩定）';
+    document.getElementById('db-type').innerText  = den.type;
+    document.getElementById('dist-lat').innerText = den.coords[0].toFixed(4) + '°N';
+    document.getElementById('dist-lon').innerText = den.coords[1].toFixed(4) + '°E';
+
+    // 更新頂部標題
+    document.getElementById('top-title').innerHTML =
+        `${den.emoji} ${den.name} — WMM 2026`;
+    document.getElementById('top-sub').innerText =
+        `${den.type} · 氣場 K=${den.k} · ${den.special}`;
+
+    // 更新底部文字
+    document.getElementById('bottom-dir').innerText =
+        `${den.emoji} 目標：${den.name}`;
+
+    // 地圖移至龍穴
+    if (denMarker) map.removeLayer(denMarker);
+    const bigIcon = L.divIcon({
+        html: `<div style="font-size:32px;text-shadow:0 0 12px ${den.color};">${den.emoji}</div>`,
+        iconSize: [36, 36], iconAnchor: [18, 18], className: ''
+    });
+    denMarker = L.marker(den.coords, { icon: bigIcon }).addTo(map);
+    denMarker.bindPopup(`<b style="color:#0a0">${den.name}</b><br>${den.desc}`).openPopup();
+    map.flyTo(den.coords, 13, { duration: 1.2 });
+
+    // 更新路徑線顏色
+    if (pathLine && userLat !== null) {
+        pathLine.setStyle({ color: den.color });
+        pathLine.setLatLngs([[userLat, userLon], den.coords]);
+    }
+
+    // 更新動態方位（若已有 GPS）
+    if (userLat !== null) refreshBearing();
+
+    // 更新距離（若已有 GPS）
+    if (userLat !== null) {
+        const d = haversine(userLat, userLon, den.coords[0], den.coords[1]);
+        updateDistDisplay(d);
+    }
+
+    // 高亮卡片
+    document.querySelectorAll('.den-card').forEach(c => {
+        c.classList.toggle('selected', parseInt(c.dataset.id) === den.id);
+    });
+
+    closePanel();
+}
+
+// 計算並更新目標方位（GPS → 龍穴）
+function refreshBearing() {
+    if (!currentDen || userLat === null) return;
+    const bear = calcBearing(userLat, userLon, currentDen.coords[0], currentDen.coords[1]);
+    document.getElementById('db-bearing').innerText = bear.toFixed(1) + '°';
+    return bear;
+}
+
+// ═══════════════════════════════════════════════════════
+//  渲染龍穴卡片列表
+// ═══════════════════════════════════════════════════════
+function renderDenList() {
+    const list = document.getElementById('den-list');
+    list.innerHTML = '';
+
+    let dens = [...DRAGON_DENS];
+
+    // 過濾
+    if (filterText) {
+        const q = filterText.toLowerCase();
+        dens = dens.filter(d =>
+            d.name.includes(q) || d.type.includes(q) || d.desc.includes(q)
+        );
+    }
+
+    // 排序
+    if (currentSort === 'power') {
+        dens.sort((a, b) => b.power - a.power);
+    } else if (currentSort === 'dist') {
+        if (userLat !== null) {
+            dens.sort((a, b) =>
+                haversine(userLat, userLon, a.coords[0], a.coords[1]) -
+                haversine(userLat, userLon, b.coords[0], b.coords[1])
+            );
+        }
+    } else {
+        dens.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    if (dens.length === 0) {
+        list.innerHTML = '<div style="color:#3a5a3a;text-align:center;padding:20px;">無符合條件的龍穴</div>';
+        return;
+    }
+
+    dens.forEach(den => {
+        const isSelected = currentDen && currentDen.id === den.id;
+
+        // 計算距離（若有 GPS）
+        let distTxt = '—';
+        if (userLat !== null) {
+            const d = haversine(userLat, userLon, den.coords[0], den.coords[1]);
+            distTxt = d >= 1000 ? (d/1000).toFixed(1)+' km' : Math.round(d)+' m';
+        }
+
+        const card = document.createElement('div');
+        card.className = 'den-card' + (isSelected ? ' selected' : '');
+        card.dataset.id = den.id;
+        card.style.setProperty('--type-color', den.color);
+        card.innerHTML = `
+            <div style="position:absolute;left:0;top:0;bottom:0;width:4px;background:${den.color};border-radius:4px 0 0 4px;"></div>
+            <div class="den-card-top" style="margin-left:4px;">
+                <span class="den-emoji">${den.emoji}</span>
+                <div>
+                    <span class="den-name">${den.name}</span>
+                    <span class="den-type" style="color:${den.typeColor};border-color:${den.typeColor};">${den.type}</span>
+                </div>
+            </div>
+            <div class="den-desc" style="margin-left:4px;">${den.desc}</div>
+            <div class="den-stats" style="margin-left:4px;">
+                <div class="den-stat">⚡ <span>${den.power}%</span></div>
+                <div class="den-stat">K值 <span>${den.k}</span></div>
+                <div class="den-stat">📍 <span>${distTxt}</span></div>
+                <div class="den-stat" style="color:${den.color};">${den.special}</div>
+            </div>
+            <div class="power-bar-wrap" style="margin-left:4px;">
+                <div class="power-bar" style="width:${den.power}%;background:${den.color};"></div>
+            </div>
+        `;
+        card.addEventListener('click', () => selectDen(den));
+        list.appendChild(card);
+    });
+}
+
+function filterDens(q) {
+    filterText = q;
+    renderDenList();
+}
+
+function sortDens(type) {
+    currentSort = type;
+    document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('sort-' + type).classList.add('active');
+    renderDenList();
+}
+
+// ═══════════════════════════════════════════════════════
+//  啟動系統
+// ═══════════════════════════════════════════════════════
+function startSystem() {
+    if (systemStarted) return;
+    if (!currentDen) {
+        document.getElementById('guide-msg').innerText = '⚠️ 請先選擇目標龍穴！';
+        return;
+    }
+    systemStarted = true;
+
+    document.getElementById('nav-btn').style.display = 'none';
+    document.getElementById('scan-line').style.display = 'block';
+    document.getElementById('compass-ring').style.display = 'block';
+    document.getElementById('diff-bar-wrap').style.display = 'block';
+    document.getElementById('db-heading-row').style.display = 'block';
+    document.getElementById('db-platform-row').style.display = 'block';
+    document.getElementById('guide-msg').innerText = '正在初始化 GPS 與感測器…';
+
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission()
+            .then(s => {
+                if (s === 'granted') bindSensors('iOS');
+                else setGuide('⚠️ 方向感測器權限被拒絕，請在設定中開啟', 'red');
+            })
+            .catch(() => bindSensors('iOS'));
+    } else {
+        bindSensors('Android / 標準');
+    }
+
+    startGPS();
+}
+
+// ═══════════════════════════════════════════════════════
+//  GPS
+// ═══════════════════════════════════════════════════════
+function startGPS() {
+    if (!('geolocation' in navigator)) {
+        setGuide('❌ 此裝置不支援 GPS', 'red'); return;
+    }
+    const userIcon = L.divIcon({
+        html: '<div style="width:14px;height:14px;background:#0f0;border-radius:50%;border:2px solid #fff;box-shadow:0 0 10px #0f0;"></div>',
+        iconSize:[14,14], iconAnchor:[7,7], className:''
+    });
+
+    navigator.geolocation.watchPosition(pos => {
+        const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+        userLat = lat; userLon = lon;
+
+        if (!userMarker) {
+            userMarker = L.marker([lat, lon], { icon: userIcon }).addTo(map);
+        } else {
+            userMarker.setLatLng([lat, lon]);
+        }
+
+        // 路徑線
+        if (!pathLine && currentDen) {
+            pathLine = L.polyline([[lat, lon], currentDen.coords], {
+                color: currentDen.color, weight: 1.5, dashArray: '6,8', opacity: 0.65
+            }).addTo(map);
+        } else if (pathLine && currentDen) {
+            pathLine.setLatLngs([[lat, lon], currentDen.coords]);
+        }
+
+        if (!firstLocDone) {
+            map.setView([lat, lon], 14);
+            firstLocDone = true;
+        }
+
+        document.getElementById('gps-acc').innerText = accuracy ? `±${Math.round(accuracy)} m` : '—';
+
+        // 更新距離 & 方位
+        if (currentDen) {
+            const d = haversine(lat, lon, currentDen.coords[0], currentDen.coords[1]);
+            updateDistDisplay(d);
+            refreshBearing();
+        }
+
+        // 重新渲染卡片（距離排序時會更新）
+        if (currentSort === 'dist') renderDenList();
+
+        setGuide('GPS 已鎖定 · 緩慢旋轉手機對準龍穴方位', 'green');
+    }, err => {
+        const m = {1:'❌ GPS 權限被拒絕',2:'⚠️ 無法取得訊號，請至開放空間',3:'⏱️ 訊號逾時，重試中…'};
+        setGuide(m[err.code] || '❌ GPS 錯誤', 'red');
+    }, { enableHighAccuracy: true, maximumAge: 3000, timeout: 15000 });
+}
+
+// ═══════════════════════════════════════════════════════
+//  感測器（iOS + Android）
+// ═══════════════════════════════════════════════════════
+function bindSensors(platform) {
+    document.getElementById('db-platform').innerText = platform;
+
+    window.addEventListener('deviceorientation', e => {
+        if (e.alpha === null && e.beta === null && e.gamma === null) return;
+
+        let magHeading;
+        if (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) {
+            magHeading = e.webkitCompassHeading; // iOS：直接給磁北方位角
+        } else {
+            if (e.alpha === null) return;
+            magHeading = (360 - (e.alpha % 360) + 360) % 360; // Android CCW→CW
+        }
+
+        // 真北方位角 = 磁北 + 磁偏角
+        const trueHeading = (magHeading + MAG_DECL + 360) % 360;
+        document.getElementById('db-heading').innerText = trueHeading.toFixed(1) + '°';
+
+        updateCompassArrow(trueHeading);
+
+        if (!currentDen || userLat === null) return;
+
+        // 目標方位（動態計算）
+        const targetBear = calcBearing(userLat, userLon, currentDen.coords[0], currentDen.coords[1]);
+
+        let diff = trueHeading - targetBear;
+        if (diff >  180) diff -= 360;
+        if (diff < -180) diff += 360;
+        const absDiff = Math.abs(diff);
+
+        updateDiffBar(absDiff);
+        updateGuideByDiff(diff, absDiff);
+    }, true);
+}
+
+// ═══════════════════════════════════════════════════════
+//  UI 更新
+// ═══════════════════════════════════════════════════════
+function updateCompassArrow(heading) {
+    const ring = document.getElementById('compass-ring');
+    ring.style.transform = `translate(-50%, -50%) rotate(${heading}deg)`;
+}
+
+function updateDiffBar(absDiff) {
+    const bar  = document.getElementById('diff-bar');
+    const pct  = Math.min(absDiff / 90, 1);
+    const w    = 50 + pct * 50;
+    const r    = Math.round(255 * pct);
+    const g    = Math.round(255 * (1 - pct));
+    bar.style.width      = `${w}%`;
+    bar.style.background = `rgb(${r},${g},0)`;
+}
+
+function updateGuideByDiff(diff, absDiff) {
+    const msg = document.getElementById('guide-msg');
+    if (absDiff <= ALIGN_THRESH) {
+        const name = currentDen ? currentDen.name : '龍穴';
+        msg.innerHTML = `<span class="sync-active">🔴 已對準「${name}」龍脈！緩步前行 ${currentDen.emoji}</span>`;
+    } else {
+        const dir = diff > 0 ? '逆時針' : '順時針';
+        msg.style.color = '#0f0';
+        msg.innerText   = `請${dir}旋轉 ${absDiff.toFixed(1)}° 對準龍穴方位`;
+    }
+}
+
+function updateDistDisplay(meters) {
+    const el = document.getElementById('dist-val');
+    el.innerText = meters >= 1000 ? (meters/1000).toFixed(2)+' km' : Math.round(meters)+' m';
+    el.style.color = meters < 50 ? '#f44' : meters < 200 ? '#ffd700' : '#0f0';
+}
+
+function setGuide(txt, type) {
+    const el = document.getElementById('guide-msg');
+    el.innerHTML   = txt;
+    el.style.color = type === 'red' ? '#f44' : '#0f0';
+}
+
+// ═══════════════════════════════════════════════════════
+//  地理計算
+// ═══════════════════════════════════════════════════════
+function haversine(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function calcBearing(lat1, lon1, lat2, lon2) {
+    const φ1 = toRad(lat1), φ2 = toRad(lat2), Δλ = toRad(lon2 - lon1);
+    const y = Math.sin(Δλ) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+function toRad(d) { return d * Math.PI / 180; }
+function toDeg(r) { return r * 180 / Math.PI; }
+
+// ═══════════════════════════════════════════════════════
+//  RWD
+// ═══════════════════════════════════════════════════════
+window.addEventListener('resize', () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    map.invalidateSize();
+});
+
+// 點擊地圖外關閉面板
+document.addEventListener('click', e => {
+    const panel = document.getElementById('select-panel');
+    const btn   = document.getElementById('open-select-btn');
+    if (panel.classList.contains('open') && !panel.contains(e.target) && e.target !== btn) {
+        closePanel();
+    }
+});
+
+window.onload = init;
+</script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
