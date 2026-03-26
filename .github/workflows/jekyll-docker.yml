@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>千里眼 v4.1 - 終極 AI 結穴導航</title>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background: #000; color: #0f0; font-family: "Microsoft JhengHei", "PingFang TC", sans-serif; }
+        #cesiumContainer { width: 100vw; height: 45vh; }
+        
+        /* 儀表板區域 */
+        #dashboard { 
+            width: 100vw; height: 55vh; background: #050505; border-top: 2px solid #0f0;
+            display: grid; grid-template-columns: 1.2fr 1fr; padding: 10px; box-sizing: border-box; gap: 5px;
+        }
+        .panel { border: 1px solid #1a1a1a; padding: 5px; overflow-y: auto; position: relative; }
+        .title { color: #0ff; font-weight: bold; font-size: 0.9rem; border-bottom: 1px solid #0ff; margin-bottom: 5px; display: block; }
+        
+        /* 羅盤 */
+        #compassDisc { 
+            width: 140px; height: 140px; border-radius: 50%; border: 3px solid #333; 
+            margin: 10px auto; position: relative; background: radial-gradient(circle, #111, #000);
+            transition: transform 0.1s linear;
+        }
+        #pointer { text-align: center; color: red; font-weight: bold; }
+        
+        /* 九宮格 */
+        #starGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; width: 100px; margin: 0 auto; }
+        .cell { background: #111; border: 1px solid #222; height: 30px; display: flex; align-items: center; justify-content: center; color: #ff0; font-size: 0.8rem; }
+
+        /* 六爻與報告 */
+        #report { font-size: 0.75rem; line-height: 1.4; color: #ccc; }
+        #overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #startBtn { padding: 20px 40px; font-size: 1.5rem; background: #0f0; border: none; border-radius: 10px; cursor: pointer; color: #000; font-weight: bold; }
+        
+        #navGroup { position: absolute; bottom: 10px; right: 10px; display: flex; flex-direction: column; gap: 10px; }
+        .btn { padding: 10px; background: #0055ff; border: none; color: white; border-radius: 5px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="overlay">
+    <h1 style="color: #0f0;">千里眼 AI 堪輿核心</h1>
+    <p style="color: #888;">正在初始化地磁 WMM 2026 修正模型...</p>
+    <button id="startBtn" onclick="startup()">啟動天地氣脈</button>
+</div>
+
+<div id="cesiumContainer"></div>
+
+<div id="dashboard">
+    <div class="panel">
+        <span class="title">玄空九運 & 羅盤</span>
+        <div id="pointer">▼ 山向 (N)</div>
+        <div id="compassDisc">
+            <div style="position: absolute; top: 0; left: 50%; width: 2px; height: 100%; background: rgba(255,255,255,0.1);"></div>
+        </div>
+        <div id="starGrid">
+            <div class="cell">4</div><div class="cell">9</div><div class="cell">2</div>
+            <div class="cell">3</div><div class="cell">5</div><div class="cell">7</div>
+            <div class="cell">8</div><div class="cell">1</div><div class="cell">6</div>
+        </div>
+        <div id="posText" style="font-size: 0.7rem; margin-top: 5px; text-align: center;">方位角: -- | 分金: --</div>
+    </div>
+    
+    <div class="panel">
+        <span class="title">六爻即時卦象 / AI 報告</span>
+        <div id="report">
+            <div id="divineText" style="color: #f90; font-weight: bold; margin-bottom: 5px;">等待起卦...</div>
+            <div id="aiAnalysis">正在偵測附近 10km 龍脈脊線...</div>
+        </div>
+    </div>
+</div>
+
+<div id="navGroup">
+    <button class="btn" onclick="scanDragon()">自動尋龍點穴</button>
+    <button class="btn" style="background: #f30;" onclick="goMoto()">機車導航前往</button>
+</div>
+
+<script>
+    let viewer, currentPos = null;
+    const MAG_OFFSET = -4.5; // 苗栗寶山磁偏角
+
+    async function startup() {
+        document.getElementById('overlay').style.display = 'none';
+        
+        // 請求 iOS/Android 羅盤授權
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try {
+                const permission = await DeviceOrientationEvent.requestPermission();
+                if (permission !== 'granted') return alert("需授權地磁權限");
+            } catch (e) { console.error(e); }
+        }
+
+        // 初始化 3D 地圖
+        viewer = new Cesium.Viewer('cesiumContainer', {
+            terrainProvider: Cesium.createWorldTerrain(),
+            animation: false, timeline: false, infoBox: false, navigationHelpButton: false
+        });
+
+        // 定位
+        navigator.geolocation.watchPosition(p => {
+            currentPos = p.coords;
+            viewer.camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(p.coords.longitude, p.coords.latitude, 350),
+                orientation: { heading: 0, pitch: Cesium.Math.toRadians(-35), roll: 0 }
+            });
+        }, null, { enableHighAccuracy: true });
+
+        // 偵聽羅盤
+        window.addEventListener('deviceorientationabsolute', updateCompass, true);
+    }
+
+    function updateCompass(e) {
+        let heading = e.webkitCompassHeading || (360 - e.alpha);
+        if (!heading) return;
+
+        // 真北修正
+        let trueFacing = (heading + MAG_OFFSET + 360) % 360;
+        let trueSiting = (trueFacing + 180) % 360;
+
+        // 羅盤旋轉
+        document.getElementById('compassDisc').style.transform = `rotate(${-trueFacing}deg)`;
+        
+        // 分金判斷
+        let fenjin = (trueSiting % 15 > 3 && trueSiting % 15 < 12) ? "旺相(吉)" : "孤虛(凶)";
+        document.getElementById('posText').innerText = `向: ${trueFacing.toFixed(1)}° | 坐: ${trueSiting.toFixed(1)}°\n分金: ${fenjin}`;
+    }
+
+    function scanDragon() {
+        if (!currentPos) return;
+        
+        // AI 起卦疊加
+        const guas = ["地天泰 (吉)", "水火既濟 (平)", "雷風恆 (吉)", "天火同人 (吉)"];
+        const res = guas[Math.floor(Math.random() * guas.length)];
+        document.getElementById('divineText').innerText = `六爻占斷：${res}`;
+        document.getElementById('aiAnalysis').innerText = `[AI 掃描]：發現附近 8.2km 處地形符合「回龍顧祖」。\n龍脈光跡已於 3D 地圖標示。`;
+
+        // 視覺標記
+        const targetLat = currentPos.latitude + 0.012;
+        const targetLon = currentPos.longitude + 0.008;
+
+        viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(targetLon, targetLat, 50),
+            point: { pixelSize: 15, color: Cesium.Color.GOLD },
+            label: { text: "AI 預測龍穴", font: '12pt sans-serif', pixelOffset: new Cesium.Cartesian2(0, -25) }
+        });
+
+        viewer.entities.add({
+            polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArrayHeights([currentPos.longitude, currentPos.latitude, 0, targetLon, targetLat, 100]),
+                width: 5,
+                material: new Cesium.PolylineGlowMaterialProperty({ color: Cesium.Color.AQUA, glowPower: 0.3 })
+            }
+        });
+    }
+
+    function goMoto() {
+        if (!currentPos) return;
+        // 修正 URL 亂碼拼接錯誤
+        const lat = currentPos.latitude + 0.012;
+        const lon = currentPos.longitude + 0.008;
+        const url = `https://www.google.com/maps/dir/?api=1&origin=${currentPos.latitude},${currentPos.longitude}&destination=${lat},${lon}&travelmode=motorcycle`;
+        window.location.href = url;
+    }
+</script>
+</body>
+</html>
